@@ -1,5 +1,7 @@
+-record(ack, {code, info}).
+
 -record(user_info, {account="", name=""}).
--record(account_info, {account="", passwd="", register_time=0, server=[], socket=[], login_time=0, logout_time=0, user_info}).
+-record(account_info, {account="", passwd="", register_time=0, socket=[], login_time=0, logout_time=0, user_info, delete_time=0}).
 
 -record(friend_simple, {account="", friend_time=0}).
 -record(friend_info, {account="", friends}).

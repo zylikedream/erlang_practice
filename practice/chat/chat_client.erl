@@ -15,10 +15,14 @@ loop(Socket) ->
             gen_tcp:send(Socket, Data),
             loop(Socket);
         {tcp, Socket, Bin} -> 
-            {MsgId, Msg} = proto:decode(Bin),
+            {{MsgId, Msg}, _} = proto:decode(Bin),
             case MsgId of 
                 ?MSG_ACK ->
-                    io:format("recv ack:~p~n", [Msg]);
+                    io:format("recv ack:~p~n", [Msg]),
+                    case Msg#sc_ack_msg.id of 
+                        ?MSG_LOGOUT -> gen_tcp:close(Socket);
+                        _ -> void
+                    end;
                 ?MSG_FRIEND_INFO ->
                     io:format("recv friend info:~p~n", [Msg]);
                 ?MSG_FRIEND_LIST ->

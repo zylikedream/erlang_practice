@@ -4,24 +4,25 @@
 
 decode(Bin)->
     <<MsgId:16,Data/binary>> = Bin,
-    case MsgId of 
-        ?MSG_ACK-> {?MSG_ACK, decode_msg_ack(Data)};
-        ?MSG_LOGIN -> {?MSG_LOGIN, decode_msg_login(Data)};
-        ?MSG_REGISTER-> {?MSG_REGISTER, decode_msg_register(Data)};
-        ?MSG_LOGOUT-> {?MSG_LOGOUT, decode_msg_logout(Data)};
-        ?MSG_UNREGISTER-> {?MSG_UNREGISTER, decode_msg_unregister(Data)};
-        ?MSG_ADD_FRIEND-> {?MSG_ADD_FRIEND, decode_msg_add_friend(Data)};
-        ?MSG_SEARCH_FRIEND-> {?MSG_SEARCH_FRIEND, decode_msg_search_friend(Data)};
-        ?MSG_FRIEND_INFO-> {?MSG_FRIEND_INFO, decode_msg_friend_info(Data)};
-        ?MSG_LIST_FRIEND-> {?MSG_LIST_FRIEND, decode_msg_list_friend(Data)};
-        ?MSG_REM_FRIEND-> {?MSG_REM_FRIEND, decode_msg_rem_friend(Data)};
-        ?MSG_FRIEND_LIST-> {?MSG_FRIEND_LIST, decode_msg_friend_list(Data)};
-        ?MSG_CHAT_PRIVATE-> {?MSG_CHAT_PRIVATE, decode_msg_chat_private(Data)};
-        ?MSG_CHAT_ALL-> {?MSG_CHAT_ALL, decode_msg_chat_all(Data)};
-        ?MSG_CHAT_MSG-> {?MSG_CHAT_MSG, decode_msg_chat_msg(Data)};
-        ?MSG_CHAT_LOG-> {?MSG_CHAT_LOG, decode_msg_chat_log(Data)};
-        ?MSG_CHAT_LOG_INFO-> {?MSG_CHAT_LOG_INFO, decode_msg_chat_log_info(Data)}
-    end.
+    {Msg, Left} = case MsgId of 
+        ?MSG_ACK-> decode_msg_ack(Data);
+        ?MSG_LOGIN -> decode_msg_login(Data);
+        ?MSG_REGISTER-> decode_msg_register(Data);
+        ?MSG_LOGOUT-> decode_msg_logout(Data);
+        ?MSG_UNREGISTER-> decode_msg_unregister(Data);
+        ?MSG_ADD_FRIEND-> decode_msg_add_friend(Data);
+        ?MSG_SEARCH_FRIEND-> decode_msg_search_friend(Data);
+        ?MSG_FRIEND_INFO-> decode_msg_friend_info(Data);
+        ?MSG_LIST_FRIEND-> decode_msg_list_friend(Data);
+        ?MSG_REM_FRIEND-> decode_msg_rem_friend(Data);
+        ?MSG_FRIEND_LIST-> decode_msg_friend_list(Data);
+        ?MSG_CHAT_PRIVATE-> decode_msg_chat_private(Data);
+        ?MSG_CHAT_ALL-> decode_msg_chat_all(Data);
+        ?MSG_CHAT_MSG-> decode_msg_chat_msg(Data);
+        ?MSG_CHAT_LOG-> decode_msg_chat_log(Data);
+        ?MSG_CHAT_LOG_INFO-> decode_msg_chat_log_info(Data)
+    end,
+    {{MsgId, Msg}, Left}.
 
 encode(MsgId, Msg)->
     Data = case MsgId of 

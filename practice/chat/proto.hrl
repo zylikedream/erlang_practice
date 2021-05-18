@@ -21,7 +21,6 @@
 -define(CODE_ERROR_INTERVAL, -1).
 -define(CODE_OK, 0).
 
--record(ack, {code, info}).
 -record(sc_ack_msg, {id, code, info}).
 -record(cs_login_msg, {account, passwd}).
 -record(cs_logout_msg, {}).
