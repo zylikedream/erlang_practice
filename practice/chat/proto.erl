@@ -1,5 +1,5 @@
 -module(proto).
--export([decode/1, encode/2]).
+-export([decode/1, encode/2, encode_string/1, encode_integer/2]).
 -include("proto.hrl").
 
 decode(Bin)->
@@ -15,7 +15,12 @@ decode(Bin)->
         ?MSG_FRIEND_INFO-> {?MSG_FRIEND_INFO, decode_msg_friend_info(Data)};
         ?MSG_LIST_FRIEND-> {?MSG_LIST_FRIEND, decode_msg_list_friend(Data)};
         ?MSG_REM_FRIEND-> {?MSG_REM_FRIEND, decode_msg_rem_friend(Data)};
-        ?MSG_FRIEND_LIST-> {?MSG_FRIEND_LIST, decode_msg_friend_list(Data)}
+        ?MSG_FRIEND_LIST-> {?MSG_FRIEND_LIST, decode_msg_friend_list(Data)};
+        ?MSG_CHAT_PRIVATE-> {?MSG_CHAT_PRIVATE, decode_msg_chat_private(Data)};
+        ?MSG_CHAT_ALL-> {?MSG_CHAT_ALL, decode_msg_chat_all(Data)};
+        ?MSG_CHAT_MSG-> {?MSG_CHAT_MSG, decode_msg_chat_msg(Data)};
+        ?MSG_CHAT_LOG-> {?MSG_CHAT_LOG, decode_msg_chat_log(Data)};
+        ?MSG_CHAT_LOG_INFO-> {?MSG_CHAT_LOG_INFO, decode_msg_chat_log_info(Data)}
     end.
 
 encode(MsgId, Msg)->
@@ -30,7 +35,12 @@ encode(MsgId, Msg)->
         ?MSG_FRIEND_INFO-> encode_msg_friend_info(Msg);
         ?MSG_LIST_FRIEND-> encode_msg_list_friend(Msg);
         ?MSG_REM_FRIEND-> encode_msg_rem_friend(Msg);
-        ?MSG_FRIEND_LIST-> encode_msg_friend_list(Msg)
+        ?MSG_FRIEND_LIST-> encode_msg_friend_list(Msg);
+        ?MSG_CHAT_PRIVATE-> encode_msg_chat_private(Msg);
+        ?MSG_CHAT_ALL-> encode_msg_chat_all(Msg);
+        ?MSG_CHAT_MSG-> encode_msg_chat_msg(Msg);
+        ?MSG_CHAT_LOG-> encode_msg_chat_log(Msg);
+        ?MSG_CHAT_LOG_INFO-> encode_msg_chat_log_info(Msg)
     end,
     <<MsgId:16, Data/binary>>.
 
@@ -152,6 +162,7 @@ encode_msg_rem_friend(Msg) ->
     #cs_rem_friend_msg{account_friend=AccFrd} = Msg,
     <<(encode_string(AccFrd))/binary>>.
 
+-spec decode_msg_friend_list(<<_:16, _:_*8>>) -> {#sc_friend_list_msg{friends::[any()]}, binary()}.
 decode_msg_friend_list(Data) ->
     DecodeFriendSimple = fun(FrdData)->
         {AccFrd, Data1} = decode_string(FrdData),
@@ -171,3 +182,49 @@ encode_msg_friend_list(Msg) ->
     <<(encode_list(FriendList, EncodeFriendSimple))/binary>>.
 
 
+decode_msg_chat_private(Data) ->
+    {Dst, Data1} = decode_string(Data),
+    {Content, Data2} = decode_string(Data1),
+    {#cs_chat_private{dst=Dst, content=Content}, Data2}.
+
+encode_msg_chat_private(Msg) ->
+    #cs_chat_private{dst=Dst, content=Content} = Msg,
+    <<(encode_string(Dst))/binary, (encode_string(Content))/binary>>.
+
+decode_msg_chat_all(Data) ->
+    {Content, Data1} = decode_string(Data),
+    {#cs_chat_all{content=Content}, Data1}.
+
+encode_msg_chat_all(Msg) ->
+    #cs_chat_all{content=Content} = Msg,
+    <<(encode_string(Content))/binary>>.
+
+
+decode_msg_chat_msg(Data) ->
+    {Src, Data1} = decode_string(Data),
+    {Dst, Data2} = decode_string(Data1),
+    {ChatTime, Data3} = decode_integer(Data2, 32),
+    {Content, Data4} = decode_string(Data3),
+    {SType, Data5} = decode_string(Data4),
+    Type = list_to_atom(SType),
+    {#sc_chat_msg{src=Src, dst=Dst, chat_time=ChatTime, content=Content, type=Type}, Data5}.
+
+
+encode_msg_chat_msg(Msg) ->
+    #sc_chat_msg{src=Src, dst=Dst, chat_time=ChatTime, content=Content, type=Type} = Msg,
+    <<(encode_string(Src))/binary, (encode_string(Dst))/binary, (encode_integer(ChatTime, 32))/binary, 
+            (encode_string(Content))/binary, (encode_string(atom_to_list(Type)))/binary>>.
+
+decode_msg_chat_log_info(Data) ->
+    {Logs, Data1} = decode_list(Data, fun(ChatData) -> decode_msg_chat_msg(ChatData) end),
+    {#sc_chat_log{logs=Logs}, Data1}.
+
+encode_msg_chat_log_info(Msg) ->
+    #sc_chat_log{logs=Logs} = Msg,
+    <<(encode_list(Logs, fun(ChatMsg) -> encode_msg_chat_msg(ChatMsg) end))/binary>>.
+
+decode_msg_chat_log(Data) ->
+    {#cs_chat_log{}, Data}.
+
+encode_msg_chat_log(_Msg) ->
+    <<>>.

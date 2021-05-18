@@ -1,5 +1,6 @@
 -module(chat_client).
--export([connect/0, login/3, register/3, logout/1, unregister/1, add_friend/2, search_friend/2, rem_friend/2, list_friend/1]).
+-export([connect/0, login/3, register/3, logout/1, unregister/1, add_friend/2, search_friend/2, rem_friend/2, list_friend/1,
+        chat_all/2, chat_private/3, chat_log/1]).
 -include("proto.hrl").
 
 connect()->
@@ -21,7 +22,13 @@ loop(Socket) ->
                 ?MSG_FRIEND_INFO ->
                     io:format("recv friend info:~p~n", [Msg]);
                 ?MSG_FRIEND_LIST ->
-                    io:format("recv friend list:~p~n", [Msg])
+                    io:format("recv friend list:~p~n", [Msg]);
+                ?MSG_CHAT_MSG ->
+                    io:format("recv chat msg:~p~n", [Msg]);
+                ?MSG_CHAT_LOG_INFO->
+                    io:format("recv chat log:~p~n", [Msg]);
+                _ ->
+                    io:format("recv unkown msg:~p ~p~n", [MsgId, Msg])
             end,
             loop(Socket);
         {tcp_closed, Socket} ->
@@ -62,3 +69,15 @@ list_friend(Client) ->
     Msg = #cs_list_friend_msg{},
     Client ! {self(), send, proto:encode(?MSG_LIST_FRIEND, Msg)}.
 
+chat_private(Client, Dst, Content) ->
+    Msg = #cs_chat_private{dst=Dst, content=Content},
+    Client ! {self(), send, proto:encode(?MSG_CHAT_PRIVATE, Msg)}.
+
+chat_all(Client, Content) ->
+    Msg = #cs_chat_all{content=Content},
+    Client ! {self(), send, proto:encode(?MSG_CHAT_ALL, Msg)}.
+
+
+chat_log(Client) ->
+    Msg = #cs_chat_log{},
+    Client ! {self(), send, proto:encode(?MSG_CHAT_LOG, Msg)}.

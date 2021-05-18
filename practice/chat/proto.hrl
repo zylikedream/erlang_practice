@@ -13,14 +13,15 @@
 -define(MSG_FRIEND_LIST, 1006).
 
 -define(MSG_CHAT_PRIVATE, 2001).
--define(MSG_CHAT_ROOM, 2003).
--define(MSG_CHAT_ALL, 2004).
--define(MSG_CHAT_ROOM_INFO, 2005).
--define(MSG_CHAT_GROUP, 2006).
--define(MSG_CHAT_ROOM_CREATE, 2007).
--define(MSG_CHAT_ROOM_JOIN, 2008).
--define(MSG_CHAT_ROOM_QUIT, 2009).
+-define(MSG_CHAT_ALL, 2002).
+-define(MSG_CHAT_LOG, 2003).
+-define(MSG_CHAT_LOG_INFO, 2004).
+-define(MSG_CHAT_MSG, 2005).
 
+-define(CODE_ERROR_INTERVAL, -1).
+-define(CODE_OK, 0).
+
+-record(ack, {code, info}).
 -record(sc_ack_msg, {id, code, info}).
 -record(cs_login_msg, {account, passwd}).
 -record(cs_logout_msg, {}).
@@ -32,15 +33,18 @@
 -record(sc_friend_info_msg, {account, friend_time}).
 -record(cs_rem_friend_msg, {account_friend}).
 -record(cs_list_friend_msg, {}).
-% 服务器响应的消息
 -record(sc_friend_list_msg, {friends}).
 
--record(user_info, {account="", chat_time=0, login_time=0, logout_time=0}).
--record(account_info, {account="", passwd="", register_time=0, socket=[], user_info}).
+-record(cs_chat_private, {dst, content}).
+-record(cs_chat_all, {content}).
+-record(cs_chat_log, {}).
+-record(sc_chat_msg, {src, dst, chat_time, content, type}).
+-record(sc_chat_log, {logs}).
+
+-record(user_info, {account="", name=""}).
+-record(account_info, {account="", passwd="", register_time=0, server=[], socket=[], login_time=0, logout_time=0, user_info}).
 -record(friend_simple, {account="", friend_time=0}).
 -record(friends_info, {account="", friends}).
 
--record(chat_message, {id="", src="", dst="", chat_time=0, content=""}).
--record(chat_room_member, {account="", role=""}).
--record(chat_room, {id="", type="", create_time=0, chat_history=[], members=[]}).
--record(chats_info, {account="", rooms=[]}).
+-record(chat_log, { src="", dst="", chat_time=0, content="", type=private}).
+-record(chat_info, {account="", logs=[]}).

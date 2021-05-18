@@ -1,22 +1,20 @@
 -module(chat).
--export([start/0]).
+-export([start/0, chat_log2chat_msg/1]).
 -include("proto.hrl").
+-define(GLOBAL_ACCOUNT, "@--global--@").
 
 start() ->
-    % Friend = spawn(fun() -> friend_loop() end),
-    % Chat = spawn(fun() -> chat_loop() end),
-    Server = start_server(),
+    start_server(),
     start_friend_service(),
-    start_chat_service(Server).
+    start_chat_service().
 
 start_friend_service() ->
     ets:new(friend, [set, public, named_table, {keypos, #friends_info.account}]),
     register(friend_service, spawn(fun() -> friend_loop() end)).
 
-start_chat_service(Server) ->
-    ets:new(user_chat, [set, public, named_table, {keypos, #chats_info.account}]),
-    ets:new(chat_room, [set, public, named_table, {keypos, #chat_room.id}]),
-    register(chat_service, spawn(fun() -> chat_loop(Server) end)).
+start_chat_service() ->
+    ets:new(chat, [set, public, named_table, {keypos, #chat_info.account}]),
+    register(chat_service, spawn(fun() -> chat_loop() end)).
 
 
 start_server() ->
@@ -40,142 +38,219 @@ socket_loop(Socket, Account) ->
             Acc = handle_account_msg({Socket, Account, MsgId, Msg}),
             socket_loop(Socket, Acc);
         {tcp_closed, Socket}->
-            io:format("socket ~w close ~n", [Socket])
+            io:format("socket ~w close ~n", [Socket]),
+            disconnect(Account);
+        {chat_push, Acc, ChatLog}->
+            spawn(fun() -> handle_chat_push(Acc, ChatLog) end),
+            socket_loop(Socket, Account)
     end.
+
+ack(Code, Info) ->
+    #ack{code=Code, info=Info}.
+
+disconnect("") -> 
+    void;
+disconnect(Account) -> 
+    ets:update_element(account, Account, {#account_info.logout_time, timestamp()}),
+    ets:update_element(account, Account, {#account_info.socket, []}).
+
+is_user_online(AccInfo) when AccInfo#account_info.socket =:= [] -> false;
+is_user_online(_AccInfo) -> true.
+
+handle_chat_push(Acc, ChatLog) ->
+    case ChatLog#chat_log.type of  
+       private ->
+           chat_private_push(Acc, ChatLog);
+       global ->
+           chat_global_push(Acc, ChatLog)
+    end.
+
+chat_log2chat_msg([]) ->
+    [];
+chat_log2chat_msg(ChatLog) ->
+    #chat_log{src=Src, dst=Dst, content=Content, chat_time=ChatTime, type=Type} = ChatLog,
+    #sc_chat_msg{src=Src, dst=Dst, content=Content, chat_time=ChatTime, type=Type}.
+
+
+chat_private_push(Acc, ChatLog) ->
+    case ets:lookup(account, Acc) of
+        [] ->
+            void;
+        [AccInfo] ->
+            case is_user_online(AccInfo) of 
+                true -> gen_tcp:send(AccInfo#account_info.socket, proto:encode(?MSG_CHAT_MSG, chat_log2chat_msg(ChatLog))); 
+                false -> void
+            end
+    end.
+
+chat_global_push(_Acc, ChatLog) ->
+    lists:map(fun(AccInfo) ->  
+            case is_user_online(AccInfo) of 
+                true -> gen_tcp:send(AccInfo#account_info.socket, proto:encode(?MSG_CHAT_MSG, chat_log2chat_msg(ChatLog))); 
+                false -> void
+            end
+        end,
+        ets:tab2list(account)).
+
 
 handle_account_msg({Socket, Account, MsgId, Msg}) ->
-    {Acc, Resp} = case MsgId of
+    {Acc, Ack} = case MsgId of
         ?MSG_LOGIN -> do_login(Socket, Account, Msg);
-        ?MSG_REGISTER-> do_register(Msg);
-        ?MSG_LOGOUT-> do_logout(Account, Msg);
+        ?MSG_REGISTER-> do_register(Socket, Msg);
+        ?MSG_LOGOUT-> do_logout(Socket, Account, Msg);
         ?MSG_UNREGISTER-> do_unregister(Socket, Account, Msg);
-        ?MSG_ADD_FRIEND -> do_add_friend(Account, Msg);
+
+        ?MSG_ADD_FRIEND -> do_add_friend(Socket, Account, Msg);
         ?MSG_SEARCH_FRIEND -> do_search_friend(Socket, Account, Msg);
-        ?MSG_REM_FRIEND -> do_rem_friend(Account, Msg);
-        ?MSG_LIST_FRIEND -> do_list_friend(Socket, Account, Msg)
+        ?MSG_REM_FRIEND -> do_rem_friend(Socket, Account, Msg);
+        ?MSG_LIST_FRIEND -> do_list_friend(Socket, Account, Msg);
+
+        ?MSG_CHAT_ALL -> do_chat_all(Socket, Account, Msg);
+        ?MSG_CHAT_PRIVATE -> do_chat_private(Socket, Account, Msg);
+        ?MSG_CHAT_LOG-> do_chat_log(Socket, Account, Msg)
     end,
-    io:format("handler Msg id:~w data:~w result:~s~n", [MsgId, Msg, Resp]),
+    io:format("handler Msg id:~p data:~p ack:~p~n", [MsgId, Msg, Ack]),
     % ack消息
-    Ack =#sc_ack_msg{id=MsgId, code=0, info=Resp},
-    gen_tcp:send(Socket, proto:encode(?MSG_ACK, Ack)),
+    AckMsg =#sc_ack_msg{id=MsgId, code=Ack#ack.code, info=Ack#ack.info},
+    gen_tcp:send(Socket, proto:encode(?MSG_ACK, AckMsg)),
     Acc.
 
-do_add_friend(Account, Msg) ->
-    friend_service ! {self(), ?MSG_ADD_FRIEND, {Account, Msg#cs_add_friend_msg.account_friend}},
+handle_service_msg(Socket, Account) ->
     receive 
-        Resp -> {Account, Resp}
-    after 3000 ->
-        {Account, "timeout"}
-    end.
-
-do_search_friend(Socket, Account, Msg) ->
-    friend_service ! {self(), ?MSG_SEARCH_FRIEND, {Account, Msg#cs_search_friend_msg.account_friend}},
-    receive 
-        Friend -> 
+        {ack, Ack} -> 
+            {Account, Ack};
+        {?MSG_CHAT_LOG, Logs} ->
+            io:format("Logs=~p~n", [Logs]),
+            LogsMsg = #sc_chat_log{logs=lists:map(fun(Log) -> chat_log2chat_msg(Log) end, Logs)},
+            gen_tcp:send(Socket, proto:encode(?MSG_CHAT_LOG_INFO, LogsMsg)),
+            handle_service_msg(Socket, Account);
+        {?MSG_SEARCH_FRIEND,  Friend} -> 
             FrdMsg = #sc_friend_info_msg{account=Friend#friend_simple.account, friend_time=Friend#friend_simple.friend_time},
             gen_tcp:send(Socket, proto:encode(?MSG_FRIEND_INFO, FrdMsg)),
-            {Account, "success"}
-    after 3000 ->
-        {Account, "timeout"}
-    end.
-
-
-do_rem_friend(Account, Msg) ->
-    friend_service ! {self(), ?MSG_REM_FRIEND, {Account, Msg#cs_rem_friend_msg.account_friend}},
-    receive 
-        Resp-> {Account, Resp}
-    after 3000 ->
-        {Account, "timeout"}
-    end.
-
-
-do_list_friend(Socket, Account, _Msg) ->
-    friend_service ! {self(), ?MSG_LIST_FRIEND, {Account}},
-    receive 
-        Friends -> 
+            handle_service_msg(Socket, Account);
+        {?MSG_LIST_FRIEND, Friends} -> 
             FriendsMsg = #sc_friend_list_msg{friends=Friends},
             gen_tcp:send(Socket, proto:encode(?MSG_FRIEND_LIST, FriendsMsg)),
-            {Account, "success"}
+            handle_service_msg(Socket, Account)
     after 3000 ->
-        {Account, "timeout"}
+        {Account, ack(?CODE_ERROR_INTERVAL, "timeout")}
     end.
+
+do_chat_all(_Socket, "", _Msg) ->
+    {"", ack(?CODE_ERROR_INTERVAL, "need login first")};
+do_chat_all(Socket, Account, Msg) ->
+    chat_service ! {self(), ?MSG_CHAT_ALL, {Account, Msg#cs_chat_all.content}},
+    handle_service_msg(Socket, Account).
+
+do_chat_private(_Socket, "", _Msg) ->
+    {"", ack(?CODE_ERROR_INTERVAL, "need login first")};
+do_chat_private(Socket, Account, Msg) ->
+    chat_service ! {self(), ?MSG_CHAT_PRIVATE, {Account, Msg#cs_chat_private.dst, Msg#cs_chat_private.content}},
+    handle_service_msg(Socket, Account).
+
+do_chat_log(Socket, Account, _Msg) ->
+    chat_service ! {self(), ?MSG_CHAT_LOG, {Account}},
+    handle_service_msg(Socket, Account).
+
+
+do_add_friend(_Socket, "", _Msg) ->
+    {"", ack(?CODE_ERROR_INTERVAL, "need login first")};
+do_add_friend(Socket, Account, Msg) ->
+    friend_service ! {self(), ?MSG_ADD_FRIEND, {Account, Msg#cs_add_friend_msg.account_friend}},
+    handle_service_msg(Socket, Account).
+
+do_search_friend(_Socket, "", _Msg) ->
+    {"", ack(?CODE_ERROR_INTERVAL, "need login first")};
+do_search_friend(Socket, Account, Msg) ->
+    friend_service ! {self(), ?MSG_SEARCH_FRIEND, {Account, Msg#cs_search_friend_msg.account_friend}},
+    handle_service_msg(Socket, Account).
+
+do_rem_friend(_Socket, "", _Msg) ->
+    {"", ack(?CODE_ERROR_INTERVAL, "need login first")};
+do_rem_friend(Socket, Account, Msg) ->
+    friend_service ! {self(), ?MSG_REM_FRIEND, {Account, Msg#cs_rem_friend_msg.account_friend}},
+    handle_service_msg(Socket, Account).
+
+
+do_list_friend(_Socket, "", _Msg) ->
+    {"", ack(?CODE_ERROR_INTERVAL, "need login first")};
+do_list_friend(Socket, Account, _Msg) ->
+    friend_service ! {self(), ?MSG_LIST_FRIEND, {Account}},
+    handle_service_msg(Socket, Account).
 
 do_login(Socket, Account, Msg) ->
     if 
-        Account =/= "" -> {Account, "already logined"};
+        Account =/= "" -> {Account, ack(?CODE_OK, "already logined")};
         true->
             #cs_login_msg{account=Acc, passwd=Pass} = Msg,
             case ets:lookup(account, Acc) of 
-                [] -> {"", "account not found. need register first"};
+                [] -> {"", ack(?CODE_ERROR_INTERVAL, "account not found. need register first")};
                 [AccInfo] -> 
                     if 
                         AccInfo#account_info.passwd =/= Pass -> {"", "passwd or account invalid"};
                         true ->
-                            io:format("account_info:~w~n", [AccInfo]),
-                            ets:update_element(account, Acc#account_info.account, {#account_info.socket, Socket}),
-                            on_user_online(AccInfo#account_info.user_info),
-                            {Acc, "login success"}
+                            io:format("account_info:~p~n", [AccInfo]),
+                            ets:update_element(account, AccInfo#account_info.account, {#account_info.login_time, timestamp()}),
+                            ets:update_element(account, AccInfo#account_info.account, {#account_info.server, self()}),
+                            ets:update_element(account, AccInfo#account_info.account, {#account_info.socket, Socket}),
+                            on_user_online(AccInfo),
+                            {Acc, ack(?CODE_OK, "login success")}
                     end
             end
     end.
 
 
-do_logout(Account, _Msg) ->
-    if 
-        Account =:= "" -> {"", "logout failed. need login_first"};
-        true ->
-        case ets:lookup(account, Account) of 
-            [] -> {"", "logout failed.not found account"};
-            [AccInfo] ->
-                ets:update_element(account, AccInfo#account_info.account, {#account_info.user_info, AccInfo#account_info.user_info#user_info{logout_time=timestamp()}}),
-                %todo 广播玩家登出
-                {"", "logout success"}
-        end
+do_logout(_Socket, "", __Msg) ->
+        {"", ack(?CODE_ERROR_INTERVAL, "logout failed. need login first")};
+do_logout(Socket, Account, _Msg) ->
+    case ets:lookup(account, Account) of 
+        [] -> {"", ack(?CODE_ERROR_INTERVAL, "logout failed.not found account")};
+        [_AccInfo] ->
+            gen_tcp:close(Socket),
+            {"", ack(?CODE_OK, "logout success")}
     end.
 
+do_unregister(_Socket, "", _Msg) ->
+    {"", ack(?CODE_ERROR_INTERVAL, "unregister failed. need login first")};
 do_unregister(Socket, Account, _Msg) ->
-    if 
-        Account =:= "" -> {"", "unregister failed. need login_first"};
-        true ->
-        case ets:lookup(account, Account) of 
-            [] -> {"", "unregister success"};
-            [_] ->
-                ets:delete(account, Account),
-                %todo 广播玩家登出
-                gen_tcp:close(Socket),
-                {"", "unregister success"}
-        end
+    case ets:lookup(account, Account) of 
+        [] -> {"", ack(?CODE_OK, "unregister success")};
+        [_] ->
+            ets:delete(account, Account),
+            gen_tcp:close(Socket),
+            {"", ack(?CODE_OK, "unregister success")}
     end.
 
-
-do_register(Msg) ->
+do_register(_Socket, Msg) ->
     #cs_register_msg{account=Acc, passwd=Pass} = Msg,
     case ets:lookup(account, Acc) of 
         [] -> 
             ets:insert(account, #account_info{account=Acc, passwd=Pass, register_time=timestamp(), user_info=#user_info{account=Acc}}),
-            {"", "registersuccess"};
-        _ -> {"", "already reistered"}
+            {"", ack(?CODE_OK, "registersuccess")};
+        _ -> {"", ack(?CODE_ERROR_INTERVAL, "already reistered")}
     end.
 
 timestamp() ->
     {M, S, _} = os:timestamp(),
     M * 1000000 + S.
 
-on_user_online(User) ->
-    UserNew = User#user_info{login_time=timestamp()},
-    ets:update_element(account, User#user_info.account, {#account_info.user_info, UserNew}).
-    % todo 广播上线消息
+on_user_online(_AccInfo) ->
+    void.
 
 friend_loop() ->
     receive
         {From, ?MSG_ADD_FRIEND, Msg} -> 
-            From ! handle_add_friend(Msg);
+            From ! {ack, handle_add_friend(Msg)};
         {From, ?MSG_SEARCH_FRIEND, Msg} -> 
-            From ! handle_search_friend(Msg);
+            {Friend, AckInfo} = handle_search_friend(Msg),
+            From ! {?MSG_SEARCH_FRIEND, Friend},
+            From ! {ack, AckInfo};
         {From, ?MSG_REM_FRIEND, Msg} -> 
-            From ! handle_rem_friend(Msg);
+            From ! {ack, handle_rem_friend(Msg)};
         {From, ?MSG_LIST_FRIEND, Msg} -> 
-            From ! handle_list_friend(Msg)
+            {FriendList, AckInfo} = handle_list_friend(Msg),
+            From ! {?MSG_LIST_FRIEND, FriendList},
+            From ! {ack, AckInfo}
     end,
     friend_loop().
 
@@ -189,23 +264,31 @@ default_friend(Acc) ->
     Friends.
 
 handle_add_friend({AccSelf, AccFrd}) when AccSelf =:= AccFrd->
-    "Can't add self";
+    ack(?CODE_ERROR_INTERVAL, "Can't add self");
 handle_add_friend({AccSelf, AccFrd})->
+    Ack = inner_handle_add_friend({AccSelf, AccFrd}),
+    if 
+        Ack#ack.code =/= ?CODE_OK -> Ack;
+        true -> inner_handle_add_friend({AccFrd, AccSelf})
+    end.
+
+inner_handle_add_friend({AccSelf, AccFrd})->
     Friends = case ets:lookup(friend, AccSelf) of 
         [] -> default_friend(AccSelf);
         [F] -> F
     end,
     case ets:lookup(account, AccFrd) of
-        [] -> "friend not exist";
+        [] -> ack(?CODE_ERROR_INTERVAL, "friend not exist");
         [_] ->
             case find_friend(Friends#friends_info.friends, AccFrd) of
                 [] -> 
                     NewFriends = [#friend_simple{account=AccFrd, friend_time=timestamp()}|Friends#friends_info.friends],
                     ets:update_element(friend, AccSelf, {#friends_info.friends, NewFriends}),
-                    "add friend success";
-                _ -> "already friend"
+                    ack(?CODE_OK, "add friend success");
+                _ -> ack(?CODE_ERROR_INTERVAL, "already friend")
             end
     end.
+
 
 handle_search_friend({AccSelf, AccFrd})->
     Friends = case ets:lookup(friend, AccSelf) of 
@@ -213,22 +296,29 @@ handle_search_friend({AccSelf, AccFrd})->
         [F] -> F
     end,
     case find_friend(Friends#friends_info.friends, AccFrd) of
-        [] -> #friend_simple{};
-        Friend -> Friend
+        [] -> {#friend_simple{}, ack(?CODE_ERROR_INTERVAL, "not find")};
+        Friend -> {Friend, ack(?CODE_OK, "find success")}
     end.
 
 
 handle_rem_friend({AccSelf, AccFrd})->
+    Ack = inner_handle_rem_friend({AccSelf, AccFrd}),
+    if 
+        Ack#ack.code =/= ?CODE_OK -> Ack;
+        true -> inner_handle_rem_friend({AccFrd, AccSelf})
+    end.
+
+inner_handle_rem_friend({AccSelf, AccFrd})->
     Friends = case ets:lookup(friend, AccSelf) of 
-        [] -> default_friend(AccSelf);
+        [] -> ack(?CODE_OK, "find friend info failed");
         [F] -> F
     end,
     case find_friend(Friends#friends_info.friends, AccFrd) of
-        [] -> "success";
+        [] -> ack(?CODE_OK, "not friend no need remove");
         Friend -> 
             NewFriends = Friends#friends_info.friends--[Friend],
             ets:update_element(friend, AccSelf, {#friends_info.friends, NewFriends}),
-            "success"
+            ack(?CODE_OK, "success")
     end.
 
 handle_list_friend({AccSelf})->
@@ -236,73 +326,76 @@ handle_list_friend({AccSelf})->
         [] -> default_friend(AccSelf);
         [F] -> F
     end,
-    Friends#friends_info.friends.
+    {Friends#friends_info.friends, ack(?CODE_OK, "success")}.
 
-
-chat_loop(Server)->
+chat_loop()->
     receive
-        {broadcast, Members, Msg} ->
-            Server ! {self(), send_to_user, Members, Msg}
+        {From, ?MSG_CHAT_PRIVATE, Msg} ->
+            From ! {ack, chat_private(Msg)};
+        {From, ?MSG_CHAT_ALL, Msg} ->
+            From ! {ack, chat_global(Msg)};
+        {From, ?MSG_CHAT_LOG, Msg} ->
+            {Logs, AckInfo} = chat_log(Msg),
+            From ! {?MSG_CHAT_LOG, Logs},
+            From ! {ack, AckInfo}
+    end,
+    chat_loop().
+
+chat_push([], _Acc, _ChatLog) ->
+    void;
+chat_push(Server, Acc, ChatLog) ->
+    Server ! {chat_push, Acc, ChatLog}.
+
+default_chat(Src) ->
+    ChatInfo = #chat_info{account=Src},
+    ets:insert(chat, ChatInfo),
+    ChatInfo.
+
+add_chat_log(Acc, ChatLog) ->
+    ChatInfo = case ets:lookup(chat, Acc) of 
+        [] -> default_chat(Acc);
+        [C] -> C
+    end,
+    NewChatLog = [ChatLog|ChatInfo#chat_info.logs],
+    ets:update_element(chat, Acc, {#chat_info.logs, NewChatLog}).
+
+chat_private({Src, Dst, _Content}) when Src =:= Dst ->
+    ack(?CODE_ERROR_INTERVAL, "can't chat to self");
+chat_private({Src, Dst, Content}) ->
+    case ets:lookup(account, Src) of 
+        [] -> ack(?CODE_ERROR_INTERVAL, "cant' find src");
+        [AccSrc] -> 
+            case ets:lookup(account, Dst) of
+                [] -> ack(?CODE_ERROR_INTERVAL, "can't find dst");
+                [AccDst] ->
+                    ChatLog = #chat_log{src=Src, dst=Dst, chat_time=timestamp(), content=Content, type=private},
+                    add_chat_log(Src, ChatLog),
+                    add_chat_log(Dst, ChatLog),
+                    chat_push(AccSrc#account_info.server, Src, ChatLog),
+                    chat_push(AccDst#account_info.server, Dst, ChatLog),
+                    ack(?CODE_OK, "chat private success")
+            end
     end.
 
-chat_gen_private_room_id(User1, User2) when User1 < User2 ->
-    User1 ++ "_" + User2;
-chat_gen_private_room_id(User1, User2) ->
-    User2 ++ "_" + User1.
+chat_global({Src, Content}) ->
+    case ets:lookup(account, Src) of 
+        [] -> ack(?CODE_ERROR_INTERVAL, "cant' find src");
+        [AccSrc] -> 
+            ChatLog = #chat_log{src=?GLOBAL_ACCOUNT, dst=Src, chat_time=timestamp(), content=Content, type=global},
+            %全局聊天单独保存%
+            add_chat_log(?GLOBAL_ACCOUNT, ChatLog),
+            chat_push(AccSrc#account_info.server, Src, ChatLog),
+            ack(?CODE_OK, "chat global success")
+    end.
 
-chat_gen_group_room_id(Adminer) ->
-    Adminer ++ integer_to_list(timestamp()).
 
-chat_create_room({Args, Type}) ->
-    RoomId = case Type of 
-        private ->  %私聊房间
-            {User1, User2} = Args,
-            chat_gen_private_room_id(User1, User2);
-        group->
-            {Adminer} = Args,
-            chat_gen_group_room_id(Adminer)
+chat_log({Acc}) ->
+    ChatInfo = case ets:lookup(chat, Acc) of 
+        [] -> default_chat(Acc);
+        [C] -> C
     end,
-    case ets:lookup(chat_room, RoomId) of
-        [] ->
-            case Type of 
-                private ->
-                    {UserSrc, UserDst} = Args,
-                    Members = [#chat_room_member{account=UserSrc, role=admin}, #chat_room_member{account=UserDst, role=admin}];
-                    UserRoom=[RoomId|]
-                    ets:update_element((user_chat, UserSrc, {#chats_info.rooms, [RoomId|]}),
-                group->
-                    {User} = Args,
-                    Members = [#chat_room_member{account=User, role=admin}]
-            end,
-            Room = #chat_room{id=RoomId, type=Type, create_time=timestamp(), members=Members},
-
-            ets:insert(chat_room, Room),
-            {Room, "create room success"};
-        _ ->
-            {[], "create room failed! room exists"}
-   end.
-
-
-find_member([], _) -> [];
-find_member([M|_], Acc) when M#chat_room_member.account =:= Acc -> M;
-find_member([_|Members], Acc) -> find_member(Members, Acc).
-
-chat_broadcast_msg(Members, ChatMsg) ->
-    self() ! {Members, ChatMsg}.
-
-
-chat_to_room({RoomId, {Src, Dst, Content}}) ->
-    case ets:lookup(chat_room, RoomId) of
-        [] -> "can't find room";
-        [Room] -> 
-            case find_member(Room#chat_room.members, Src) =:= [] orelse (Dst =/= "" andalso find_member(Room#chat_room.members, Dst) =:= []) of 
-                true -> "not room member";
-                _ ->
-                    ChatMsg = #chat_message{id=RoomId, src=Src, dst=Dst, content=Content, chat_time=timestamp()},
-                    History = [ChatMsg|Room#chat_room.chat_history],
-                    ets:update_element(chat_room, RoomId, {#chat_room.chat_history, History}),
-                    self() ! {broadcast, Room#chat_room.members, ChatMsg},
-                    chat_broadcast_msg(Room#chat_room.members, ChatMsg),
-                    "chat_to_room success"
-            end
-end.
+    GlobalChatInfo = case ets:lookup(chat, ?GLOBAL_ACCOUNT) of 
+        [] -> #chat_info{};
+        [G] -> G
+    end,
+    {GlobalChatInfo#chat_info.logs ++ ChatInfo#chat_info.logs, ack(?CODE_OK, "get chat log success")}.
