@@ -164,22 +164,12 @@ encode_msg_rem_friend(Msg) ->
 
 -spec decode_msg_friend_list(<<_:16, _:_*8>>) -> {#sc_friend_list_msg{friends::[any()]}, binary()}.
 decode_msg_friend_list(Data) ->
-    DecodeFriendSimple = fun(FrdData)->
-        {AccFrd, Data1} = decode_string(FrdData),
-        {FriendTm, Data2} = decode_integer(Data1, 32),
-        {#friend_simple{account=AccFrd, friend_time=FriendTm}, Data2}
-    end,
-
-    {FriendList, Data1} = decode_list(Data, DecodeFriendSimple),
+    {FriendList, Data1} = decode_list(Data, fun(FrdData) -> decode_msg_friend_info(FrdData) end),
     {#sc_friend_list_msg{friends=FriendList}, Data1}.
 
 encode_msg_friend_list(Msg) ->
     #sc_friend_list_msg{friends=FriendList} = Msg,
-    EncodeFriendSimple = fun(FrdSimple) ->
-        #friend_simple{account=AccFrd, friend_time=FriendTm} = FrdSimple,
-        <<(encode_string(AccFrd))/binary, (encode_integer(FriendTm, 32))/binary>>
-    end,
-    <<(encode_list(FriendList, EncodeFriendSimple))/binary>>.
+    <<(encode_list(FriendList, fun(FrdMsg) -> encode_msg_friend_info(FrdMsg) end))/binary>>.
 
 
 decode_msg_chat_private(Data) ->

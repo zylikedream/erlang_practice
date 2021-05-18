@@ -1,15 +1,17 @@
 -module(chat).
--export([start/0, chat_log2chat_msg/1]).
+-export([start/0]).
+-include("data.hrl").
 -include("proto.hrl").
 -define(GLOBAL_ACCOUNT, "@--global--@").
 
 start() ->
+    db:start(),
     start_server(),
     start_friend_service(),
     start_chat_service().
 
 start_friend_service() ->
-    ets:new(friend, [set, public, named_table, {keypos, #friends_info.account}]),
+    ets:new(friend, [set, public, named_table, {keypos, #friend_info.account}]),
     register(friend_service, spawn(fun() -> friend_loop() end)).
 
 start_chat_service() ->
@@ -51,6 +53,7 @@ ack(Code, Info) ->
 disconnect("") -> 
     void;
 disconnect(Account) -> 
+    on_user_offline(Account),
     ets:update_element(account, Account, {#account_info.logout_time, timestamp()}),
     ets:update_element(account, Account, {#account_info.socket, []}).
 
@@ -115,6 +118,12 @@ handle_account_msg({Socket, Account, MsgId, Msg}) ->
     gen_tcp:send(Socket, proto:encode(?MSG_ACK, AckMsg)),
     Acc.
 
+friend_simple2friend_info([]) ->
+    [];
+friend_simple2friend_info(FriendSimple) ->
+    #friend_simple{account=Account, friend_time=FriendTime} = FriendSimple,
+    #sc_friend_info_msg{account=Account, friend_time=FriendTime}.
+
 handle_service_msg(Socket, Account) ->
     receive 
         {ack, Ack} -> 
@@ -129,7 +138,7 @@ handle_service_msg(Socket, Account) ->
             gen_tcp:send(Socket, proto:encode(?MSG_FRIEND_INFO, FrdMsg)),
             handle_service_msg(Socket, Account);
         {?MSG_LIST_FRIEND, Friends} -> 
-            FriendsMsg = #sc_friend_list_msg{friends=Friends},
+            FriendsMsg = #sc_friend_list_msg{friends=lists:map(fun(Frd) -> friend_simple2friend_info(Frd) end, Friends)},
             gen_tcp:send(Socket, proto:encode(?MSG_FRIEND_LIST, FriendsMsg)),
             handle_service_msg(Socket, Account)
     after 3000 ->
@@ -221,11 +230,17 @@ do_unregister(Socket, Account, _Msg) ->
             {"", ack(?CODE_OK, "unregister success")}
     end.
 
+-spec save_account(#account_info{register_time::non_neg_integer(), server::[], socket::[], login_time::0, logout_time::0, user_info::#user_info{name::[]}}) -> 'void'.
+save_account(AccInfo) ->
+    % ets:insert(account, ).
+    
+    void.
+
 do_register(_Socket, Msg) ->
     #cs_register_msg{account=Acc, passwd=Pass} = Msg,
     case ets:lookup(account, Acc) of 
         [] -> 
-            ets:insert(account, #account_info{account=Acc, passwd=Pass, register_time=timestamp(), user_info=#user_info{account=Acc}}),
+            save_account(#account_info{account=Acc, passwd=Pass, register_time=timestamp(), user_info=#user_info{account=Acc}}),
             {"", ack(?CODE_OK, "registersuccess")};
         _ -> {"", ack(?CODE_ERROR_INTERVAL, "already reistered")}
     end.
@@ -235,6 +250,8 @@ timestamp() ->
     M * 1000000 + S.
 
 on_user_online(_AccInfo) ->
+    void.
+on_user_offline(_Acc) ->
     void.
 
 friend_loop() ->
@@ -259,7 +276,7 @@ find_friend([F|_], Acc) when F#friend_simple.account =:= Acc -> F;
 find_friend([_|Friends], Acc) -> find_friend(Friends, Acc).
 
 default_friend(Acc) ->
-    Friends = #friends_info{account=Acc, friends=[]},
+    Friends = #friend_info{account=Acc, friends=[]},
     ets:insert(friend, Friends),
     Friends.
 
@@ -280,10 +297,10 @@ inner_handle_add_friend({AccSelf, AccFrd})->
     case ets:lookup(account, AccFrd) of
         [] -> ack(?CODE_ERROR_INTERVAL, "friend not exist");
         [_] ->
-            case find_friend(Friends#friends_info.friends, AccFrd) of
+            case find_friend(Friends#friend_info.friends, AccFrd) of
                 [] -> 
-                    NewFriends = [#friend_simple{account=AccFrd, friend_time=timestamp()}|Friends#friends_info.friends],
-                    ets:update_element(friend, AccSelf, {#friends_info.friends, NewFriends}),
+                    NewFriends = [#friend_simple{account=AccFrd, friend_time=timestamp()}|Friends#friend_info.friends],
+                    ets:update_element(friend, AccSelf, {#friend_info.friends, NewFriends}),
                     ack(?CODE_OK, "add friend success");
                 _ -> ack(?CODE_ERROR_INTERVAL, "already friend")
             end
@@ -295,7 +312,7 @@ handle_search_friend({AccSelf, AccFrd})->
         [] -> default_friend(AccSelf);
         [F] -> F
     end,
-    case find_friend(Friends#friends_info.friends, AccFrd) of
+    case find_friend(Friends#friend_info.friends, AccFrd) of
         [] -> {#friend_simple{}, ack(?CODE_ERROR_INTERVAL, "not find")};
         Friend -> {Friend, ack(?CODE_OK, "find success")}
     end.
@@ -313,11 +330,11 @@ inner_handle_rem_friend({AccSelf, AccFrd})->
         [] -> ack(?CODE_OK, "find friend info failed");
         [F] -> F
     end,
-    case find_friend(Friends#friends_info.friends, AccFrd) of
+    case find_friend(Friends#friend_info.friends, AccFrd) of
         [] -> ack(?CODE_OK, "not friend no need remove");
         Friend -> 
-            NewFriends = Friends#friends_info.friends--[Friend],
-            ets:update_element(friend, AccSelf, {#friends_info.friends, NewFriends}),
+            NewFriends = Friends#friend_info.friends--[Friend],
+            ets:update_element(friend, AccSelf, {#friend_info.friends, NewFriends}),
             ack(?CODE_OK, "success")
     end.
 
@@ -326,7 +343,7 @@ handle_list_friend({AccSelf})->
         [] -> default_friend(AccSelf);
         [F] -> F
     end,
-    {Friends#friends_info.friends, ack(?CODE_OK, "success")}.
+    {Friends#friend_info.friends, ack(?CODE_OK, "success")}.
 
 chat_loop()->
     receive
