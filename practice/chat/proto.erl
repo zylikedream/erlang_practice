@@ -58,7 +58,11 @@ encode_string(Str) ->
 decode_integer(Data, Size) ->
     <<Number:Size, Data1/binary>> = Data,
     {Number, Data1}.
+decode_integer_signed(Data, Size) ->
+    <<Number:Size/signed, Data1/binary>> = Data,
+    {Number, Data1}.
 
+-spec encode_integer(integer(), non_neg_integer()) -> bitstring().
 encode_integer(Number, Size) ->
     <<Number:Size>>.
 
@@ -83,7 +87,7 @@ do_encode_list(Data, [Ele|L], ElementEncoder) ->
 
 decode_msg_ack(Data) ->
     {Id, Data1} = decode_integer(Data, 32),
-    {Code, Data2} = decode_integer(Data1, 32),
+    {Code, Data2} = decode_integer_signed(Data1, 32),
     {Info, Data3} = decode_string(Data2),
     {#sc_ack_msg{id=Id, code=Code, info=Info}, Data3}.
 
@@ -165,12 +169,12 @@ encode_msg_rem_friend(Msg) ->
 
 -spec decode_msg_friend_list(<<_:16, _:_*8>>) -> {#sc_friend_list_msg{friends::[any()]}, binary()}.
 decode_msg_friend_list(Data) ->
-    {FriendList, Data1} = decode_list(Data, fun(FrdData) -> decode_msg_friend_info(FrdData) end),
+    {FriendList, Data1} = decode_list(Data, fun decode_msg_friend_info/1),
     {#sc_friend_list_msg{friends=FriendList}, Data1}.
 
 encode_msg_friend_list(Msg) ->
     #sc_friend_list_msg{friends=FriendList} = Msg,
-    <<(encode_list(FriendList, fun(FrdMsg) -> encode_msg_friend_info(FrdMsg) end))/binary>>.
+    <<(encode_list(FriendList, fun encode_msg_friend_info/1))/binary>>.
 
 
 decode_msg_chat_private(Data) ->
@@ -207,12 +211,12 @@ encode_msg_chat_msg(Msg) ->
             (encode_string(Content))/binary, (encode_string(atom_to_list(Type)))/binary>>.
 
 decode_msg_chat_log_info(Data) ->
-    {Logs, Data1} = decode_list(Data, fun(ChatData) -> decode_msg_chat_msg(ChatData) end),
+    {Logs, Data1} = decode_list(Data, fundecode_msg_chat_msg/1),
     {#sc_chat_log{logs=Logs}, Data1}.
 
 encode_msg_chat_log_info(Msg) ->
     #sc_chat_log{logs=Logs} = Msg,
-    <<(encode_list(Logs, fun(ChatMsg) -> encode_msg_chat_msg(ChatMsg) end))/binary>>.
+    <<(encode_list(Logs, fun encode_msg_chat_msg/1))/binary>>.
 
 decode_msg_chat_log(Data) ->
     {#cs_chat_log{}, Data}.

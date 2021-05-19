@@ -193,7 +193,7 @@ do_login(Socket, [], Msg) ->
         [] -> {"", ack(?CODE_ERROR_INTERVAL, "account not found. need register first")};
         [AccInfo] -> 
             if 
-                AccInfo#account_info.passwd =/= Pass -> {"", "passwd or account invalid"};
+                AccInfo#account_info.passwd =/= Pass -> {"", ack(?CODE_ERROR_INTERVAL, "passwd or account invalid")};
                 true ->
                     io:format("account_info:~p~n", [AccInfo]),
                     U = AccInfo#account_info{login_time=timestamp(), socket=Socket},
