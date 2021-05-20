@@ -1,5 +1,3 @@
--record(ack, {code, info}).
-
 -record(user_info, {account="", name=""}).
 -record(account_info, {account="", passwd="", register_time=0, socket=[], login_time=0, logout_time=0, user_info, delete_time=0}).
 
