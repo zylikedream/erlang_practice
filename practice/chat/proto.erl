@@ -45,6 +45,7 @@ encode(MsgId, Msg)->
     end,
     <<MsgId:16, Data/binary>>.
 
+
 decode_string(Data) ->
     <<Len:8, Data1/binary>> = Data,
     <<Str:Len/binary, Data2/binary>> = Data1,
@@ -211,7 +212,7 @@ encode_msg_chat_msg(Msg) ->
             (encode_string(Content))/binary, (encode_string(atom_to_list(Type)))/binary>>.
 
 decode_msg_chat_log_info(Data) ->
-    {Logs, Data1} = decode_list(Data, fundecode_msg_chat_msg/1),
+    {Logs, Data1} = decode_list(Data, fun decode_msg_chat_msg/1),
     {#sc_chat_log{logs=Logs}, Data1}.
 
 encode_msg_chat_log_info(Msg) ->

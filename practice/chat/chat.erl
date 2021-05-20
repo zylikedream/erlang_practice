@@ -45,7 +45,8 @@ socket_loop(Socket, Account) ->
             socket_loop(Socket, Account);
         {service, MsgId, {ack, Ack}, {data, Data}} ->
             async_callback(Socket, MsgId, Ack, Data),
-            gen_tcp:send(Socket, proto:encode(?MSG_ACK, Ack))
+            gen_tcp:send(Socket, proto:encode(?MSG_ACK, Ack)),
+            socket_loop(Socket, Account)
     end.
 
 ack(MsgId, Code, Info) ->
@@ -126,19 +127,19 @@ friend_simple2friend_info(FriendSimple) ->
 
 wait_sync_msg(MsgId) ->
     receive 
-        {service, MsgId,  {ack, Ack}, {data, Data}} -> 
+        {service, MsgId, {ack, Ack}, {data, Data}} -> 
             {Ack, Data}
     after 3000 ->
         {ack(MsgId, ?CODE_ERROR_INTERVAL, "timeout"), {}}
     end.
 
 sync_call(Service, MsgId, Msg) ->
-    Service ! {self, MsgId, Msg},
+    Service ! {self(), MsgId, Msg},
     wait_sync_msg(MsgId).
 
 
 async_call(Service, MsgId, Msg) ->
-    Service ! {self, MsgId, Msg},
+    Service ! {self(), MsgId, Msg},
     [].
 
 async_callback(Socket, MsgId, Ack, Data) ->
@@ -171,7 +172,6 @@ do_chat_private(_Socket, AccInfo, Msg) ->
 do_chat_log(_Socket, [], _Msg) ->
     ack(?MSG_CHAT_LOG, ?CODE_ERROR_INTERVAL, "need login first");
 do_chat_log(_Socket, AccInfo, _Msg) ->
-    chat_service ! {self(), ?MSG_CHAT_LOG, {AccInfo}},
     async_call(chat_service, ?MSG_CHAT_LOG, {AccInfo}).
 
 
@@ -363,12 +363,12 @@ handle_list_friend({SelfAccInfo})->
 chat_loop()->
     receive
         {From, ?MSG_CHAT_PRIVATE, Msg} ->
-            pack_service_result(?MSG_CHAT_PRIVATE, chat_private(From, Msg), {});
+            From ! pack_service_result(?MSG_CHAT_PRIVATE, chat_private(From, Msg), {});
         {From, ?MSG_CHAT_ALL, Msg} ->
-            pack_service_result(?MSG_CHAT_ALL, chat_global(From, Msg), {});
-        {_From, ?MSG_CHAT_LOG, Msg} ->
+            From ! pack_service_result(?MSG_CHAT_ALL, chat_global(From, Msg), {});
+        {From, ?MSG_CHAT_LOG, Msg} ->
             {Logs, Ack} = chat_log(Msg),
-            pack_service_result(?MSG_CHAT_LOG, Ack, Logs)
+            From ! pack_service_result(?MSG_CHAT_LOG, Ack, Logs)
     end,
     chat_loop().
 
