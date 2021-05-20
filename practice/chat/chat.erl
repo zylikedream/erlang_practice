@@ -10,12 +10,22 @@ start() ->
     start_friend_service(),
     start_chat_service().
 
+start_service(Service, Loop) ->
+    register(Service, Pid=spawn(Loop)),
+    spawn(fun() ->
+        Ref = monitor(process, Pid),
+        receive
+            {'DOWN', Ref, process, _Pid, Why} ->
+                io:format("service ~p down, why:~p~n", [Service, Why]),
+                start_service(Service, Loop)
+        end
+    end).
+
 start_friend_service() ->
-    register(friend_service, spawn(fun() -> friend_loop() end)).
+    start_service(friend_service, fun friend_loop/0).
 
 start_chat_service() ->
-    register(chat_service, spawn(fun() -> chat_loop() end)).
-
+    start_service(chat_service, fun chat_loop/0).
 
 start_server() ->
     ets:new(account, [set, public, named_table, {keypos, #account_info.account}]),
@@ -31,22 +41,28 @@ par_connect(Listen) ->
     socket_loop(Socket, "").
 
 socket_loop(Socket, Account) ->
-    receive
-        {tcp, Socket, Bin} ->
-            {{MsgId, Msg}, _} = proto:decode(Bin),
-            io:format("recv packet id:~w msg:~w~n", [MsgId, Msg]),
-            Acc = handle_account_msg({Socket, Account, MsgId, Msg}),
-            socket_loop(Socket, Acc);
-        {tcp_closed, Socket}->
-            io:format("Account ~s socket ~w close ~n", [Account, Socket]),
-            disconnect(get_account(Account));
-        {chat_push, Acc, ChatLog}->
-            spawn(fun() -> handle_chat_push(Acc, ChatLog) end),
-            socket_loop(Socket, Account);
-        {service, MsgId, {ack, Ack}, {data, Data}} ->
-            async_callback(Socket, MsgId, Ack, Data),
-            gen_tcp:send(Socket, proto:encode(?MSG_ACK, Ack)),
-            socket_loop(Socket, Account)
+    try
+        receive
+            {tcp, Socket, Bin} ->
+                {{MsgId, Msg}, _} = proto:decode(Bin),
+                io:format("recv packet id:~w msg:~w~n", [MsgId, Msg]),
+                Acc = handle_account_msg({Socket, Account, MsgId, Msg}),
+                socket_loop(Socket, Acc);
+            {tcp_closed, Socket}->
+                io:format("Account ~s socket ~w close ~n", [Account, Socket]),
+                disconnect(get_account(Account));
+            {chat_push, Acc, ChatLog}->
+                spawn(fun() -> handle_chat_push(Acc, ChatLog) end),
+                socket_loop(Socket, Account);
+            {service, MsgId, {ack, Ack}, {data, Data}} ->
+                async_callback(Socket, MsgId, Ack, Data),
+                socket_loop(Socket, Account)
+        end
+    catch
+        Exception:Reason -> 
+            io:format("catch exception:~p reason:~p~n", [Exception, Reason]),
+            disconnect(get_account(Account)),
+            gen_tcp:close(Socket)
     end.
 
 ack(MsgId, Code, Info) ->
@@ -133,14 +149,35 @@ wait_sync_msg(MsgId) ->
         {ack(MsgId, ?CODE_ERROR_INTERVAL, "timeout"), {}}
     end.
 
+call_service(Service, MsgId, Msg) ->
+    case whereis(Service) of 
+        undefined ->
+           {service_unvalid, Service};
+        Pid ->
+            case is_process_alive(Pid) of
+                true ->
+                    Service ! {self(), MsgId, Msg};
+                false ->
+                    {service_unvalid, Service}
+            end
+    end.
+
 sync_call(Service, MsgId, Msg) ->
-    Service ! {self(), MsgId, Msg},
-    wait_sync_msg(MsgId).
+    case call_service(Service, MsgId, Msg) of 
+        {service_unvalid, _} ->
+            ack(MsgId, ?CODE_ERROR_INTERVAL, "service unvalid");
+        _ -> 
+            wait_sync_msg(MsgId)
+    end.
 
 
 async_call(Service, MsgId, Msg) ->
-    Service ! {self(), MsgId, Msg},
-    [].
+    case call_service(Service, MsgId, Msg) of 
+        {service_unvalid, _} ->
+            ack(MsgId, ?CODE_ERROR_INTERVAL, "service unvalid");
+        _ ->
+            []
+    end.
 
 async_callback(Socket, MsgId, Ack, Data) ->
     case MsgId of 
@@ -157,7 +194,8 @@ async_callback(Socket, MsgId, Ack, Data) ->
             void;
         ?MSG_CHAT_ALL->
             void
-    end.
+    end,
+    gen_tcp:send(Socket, proto:encode(?MSG_ACK, Ack)).
 
 do_chat_all(_Socket, "", _Msg) ->
     ack(?MSG_CHAT_ALL, ?CODE_ERROR_INTERVAL, "need login first");
@@ -411,6 +449,7 @@ chat_global(From, {SrcAccInfo, Content}) ->
 
 
 chat_log({AccInfo}) ->
+    throw("chat log error"),
     Acc = AccInfo#account_info.account,
     ChatInfos = db:find_one(chat_info, fun(ChatInfo) -> 
         ChatAcc = ChatInfo#chat_info.account,
