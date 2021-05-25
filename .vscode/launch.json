@@ -46,10 +46,6 @@
             "runinterminal": [
                 "rebar3",
                 "shell",
-                "--sname",
-                "dap-project-node@localhost",
-                "--setcookie",
-                "COOKIE"
             ],
             "projectnode": "dap-project-node@localhost",
             "cookie": "COOKIE",
