@@ -5,7 +5,9 @@
   {mod, {chatserver_app, []}},
   {applications,
    [kernel,
-    stdlib
+    stdlib,
+    sasl,
+    mnesia
    ]},
   {env,[]},
   {modules, [chatserver_app, db, proto, common, chatserver_sup, server_listener, service_chat, service_friend, socket_sup, socket_handler]},
