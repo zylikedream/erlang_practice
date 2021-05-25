@@ -1,0 +1,15 @@
+{application, chatserver,
+ [{description, "chat server"},
+  {vsn, "0.1.0"},
+  {registered, [chatserver_sup, server_listener, service_chat, service_friend, socket_sup, socket_handler]},
+  {mod, {chatserver_app, []}},
+  {applications,
+   [kernel,
+    stdlib
+   ]},
+  {env,[]},
+  {modules, [chatserver_app, db, proto, common, chatserver_sup, server_listener, service_chat, service_friend, socket_sup, socket_handler]},
+
+  {licenses, ["Apache 2.0"]},
+  {links, []}
+ ]}.
