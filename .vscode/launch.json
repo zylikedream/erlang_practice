@@ -1,0 +1,60 @@
+{
+    // 使用 IntelliSense 了解相关属性。 
+    // 悬停以查看现有属性的描述。
+    // 欲了解更多信息，请访问: https://go.microsoft.com/fwlink/?linkid=830387
+    "version": "0.2.0",
+    "configurations": [
+        {
+            "name": "rebar shell",
+            "type": "erlang",
+            "request": "launch",
+            "runinterminal": [
+                "rebar3",
+                "shell",
+                "--sname",
+                "dap-project-node@localhost",
+                "--setcookie",
+                "COOKIE"
+            ],
+            "projectnode": "dap-project-node@localhost",
+            "cookie": "COOKIE",
+            "timeout": 300,
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "rebar shell --start-clean",
+            "type": "erlang",
+            "request": "launch",
+            "runinterminal": [
+                "rebar3",
+                "shell",
+                "--sname",
+                "dap-project-node@localhost",
+                "--setcookie",
+                "COOKIE",
+                "--start-clean"
+            ],
+            "projectnode": "dap-project-node@localhost",
+            "cookie": "COOKIE",
+            "timeout": 300,
+            "cwd": "${workspaceRoot}"
+        },
+        {
+            "name": "chatserver",
+            "type": "erlang",
+            "request": "launch",
+            "runinterminal": [
+                "rebar3",
+                "shell",
+                "--sname",
+                "dap-project-node@localhost",
+                "--setcookie",
+                "COOKIE"
+            ],
+            "projectnode": "dap-project-node@localhost",
+            "cookie": "COOKIE",
+            "timeout": 300,
+            "cwd": "${workspaceFolder}/practice/chatserver"
+        },
+    ]
+}
