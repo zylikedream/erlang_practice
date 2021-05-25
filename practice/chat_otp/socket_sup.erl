@@ -13,7 +13,6 @@ start_socket_handler(Listen) ->
     supervisor:start_child(?MODULE, [Listen]).
 
 init([]) ->
-    ets:new(account, [set, public, named_table, {keypos, #account_info.account}]),
     Restart = #{
         strategy => simple_one_for_one, % one_for_one | one_for_all | rest_for_one | simple_one_for_one
         intensity => 10,
