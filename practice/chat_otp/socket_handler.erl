@@ -6,23 +6,17 @@
 %% API
 -export([start_link/1]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
-start_link(Listen) ->
-    gen_server:start_link(?MODULE, [Listen], []).
+start_link(Socket) ->
+    gen_server:start_link(?MODULE, [Socket], []).
 
-init([Listen]) ->
-    gen_server:cast(self(), accept),
-    {ok, #{listen=>Listen, socket=>[], account=>""}}.
+init([Socket]) ->
+    {ok, #{socket=>Socket, account=>""}}.
 
 handle_call(stop, _From, State) ->
     {stop, normal, stopped, State};
 handle_call(_Request, _From, State) ->
     {reply, ok, State}.
 
-handle_cast(accept, #{listen := Listen} = State) ->
-    error_logger:info_msg("start listen:~p~n", [Listen]),
-    {ok, Socket} = gen_tcp:accept(Listen),
-    gen_server:cast(server_listener, {accept, Socket}),
-    {noreply, State#{socket:=Socket}};
 handle_cast(_Msg, State) ->
     error_logger:info_msg("cast Msg:~p~n", [_Msg]),
     {noreply, State}.
@@ -48,7 +42,7 @@ handle_info(_Info, State) ->
 
 terminate(_Reason, _State) ->
     ok.
-
+ 
 code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
@@ -110,6 +104,7 @@ do_logout(_, _Msg) ->
     %登出不处理，再断开连接时处理
     common:ack(?MSG_LOGOUT, ?CODE_OK, "logout success").
 
+-spec do_unregister([] | #account_info{}, _) -> any().
 do_unregister([], _Msg) ->
     common:ack(?MSG_UNREGISTER, ?CODE_ERROR_INTERVAL, "unregister failed. need login first");
 do_unregister(AccInfo, _Msg) ->

@@ -1,4 +1,5 @@
 -module(server_sup).
+-include("data.hrl").
 -behaviour(supervisor).
 
 %% API
@@ -9,6 +10,8 @@ start_link(_Args) ->
     supervisor:start_link({local, ?MODULE}, ?MODULE, []).
 
 init([]) ->
+    db:start(),
+    ets:new(account, [set, public, named_table, {keypos, #account_info.account}]),
     Restart = #{
         strategy => one_for_one, % one_for_one | one_for_all | rest_for_one | simple_one_for_one
         intensity => 10,
@@ -24,14 +27,13 @@ init([]) ->
             modules => [socket_sup]
         },
         #{
-            id => server_listener,
-            start => {server_listener, start_link, []},
+            id => {socket_acceptor_sup,1 },
+            start => {socket_acceptor_sup, start_link, []},
             restart => permanent, % permanent | transient | temporary
             shutdown => 2000,
             type => worker, % worker | supervisor
-            modules => [server_listener]
+            modules => [socket_acceptor_sup]
         }, 
-        
         #{
             id => service_chat,
             start => {service_chat, start_link, []},
