@@ -15,14 +15,14 @@ start_socket_handler(Socket) ->
 init([]) ->
     Restart = #{
         strategy => simple_one_for_one, % one_for_one | one_for_all | rest_for_one | simple_one_for_one
-        intensity => 10,
-        period => 60},
+        intensity => 0,
+        period => 1},
     Wokers = [
         #{
             id => socket_handler,
             start => {socket_handler, start_link, []},
-            restart => permanent, % permanent | transient | temporary
-            shutdown => 2000,
+            restart => temporary, % permanent | transient | temporary
+            shutdown => brutal_kill,
             type => worker, % worker | supervisor
             modules => [socket_handler, db, proto, common]
         }

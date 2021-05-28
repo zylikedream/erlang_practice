@@ -24,7 +24,7 @@ handle_cast(_Msg, State) ->
 handle_info({tcp_closed, Socket}, #{account:=Account}=State) ->
     error_logger:info_msg("Account ~s socket ~w close ~n", [Account, Socket]),
     disconnect(get_account(Account)),
-    {noreply, State#{socket:=[], account:=""}};
+    {stop, normal, State#{socket:=[], account:=""}};
 handle_info({tcp, Socket, Bin}, State) ->
     {{MsgId, Msg}, _} = proto:decode(Bin),
     error_logger:info_msg("recv packet id:~w msg:~w~n", [MsgId, Msg]),
