@@ -21,12 +21,12 @@ init([]) ->
 
     Wokers = [
         #{
-            id => db,
-            start => {db, start_link, []},
+            id => db_sup,
+            start => {db_sup, start_link, []},
             restart => permanent, % permanent | transient | temporary
             shutdown => 2000,
             type => worker, % worker | supervisor
-            modules => []
+            modules => [db_sup]
         },
         #{
             id => service_chat,
