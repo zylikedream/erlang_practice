@@ -20,9 +20,9 @@ start_link() ->
 
 init([]) ->
     {ok, Conn} = mongo_api:connect(single, "127.0.0.1:27017", [{name, dbpool}, {pool_size, 10}], [{database, <<"chat">>}]),
-    Servers = [#{id=>{db, Id}, start=>{db, start_link, [Id, Conn]},
-                restart=>permanent, shutdonw=>2000, type=>worker, modules=>[db]} || Id <- lists:seq(1, ?MAX_DB)],
-    Children = Servers,
-    RestartStrategy = #{strategy => one_for_all, % one_for_one | one_for_all | rest_for_one | simple_one_for_one
+    Server = #{id=>db, start=>{db, start_link, [Conn]},
+                restart=>permanent, shutdonw=>2000, type=>worker, modules=>[db]},
+    Children = [Server],
+    RestartStrategy = #{strategy => one_for_one, % one_for_one | one_for_all | rest_for_one | simple_one_for_one
         intensity => 10, period => 60},
     {ok, {RestartStrategy, Children}}.

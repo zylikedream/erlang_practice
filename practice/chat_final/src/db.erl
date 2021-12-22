@@ -4,13 +4,13 @@
 -include("db.hrl").
 
 %% API
--export([start_link/2]).
+-export([start_link/1]).
 -export([record_2_map/2, map_2_record/2]).
 -export([insert_one/2, update/3, find_account_info/1, find_chat_info/1, find_friend_info/1, update_raw/3, find_all_chat_info/2]).
 -export([init/1, handle_call/3, handle_cast/2, handle_info/2, terminate/2, code_change/3]).
 
-start_link(Id, Conn) ->
-    gen_server:start_link({local, get_db(Id)}, ?MODULE, [Conn], []).
+start_link(Conn) ->
+    gen_server:start_link({local, get_db()}, ?MODULE, [Conn], []).
 
 init([Conn]) ->
     {ok, #{conn=>Conn}}.
@@ -46,17 +46,11 @@ code_change(_OldVsn, State, _Extra) ->
     {ok, State}.
 
 get_db() ->
-    Id = rand:uniform(?MAX_DB),
-    Db = get_db(Id),
-    error_logger:info_msg("get_db=~p~n", [Db]),
-    Db.
-get_db(Id) ->
-    list_to_atom(atom_to_list(?MODULE) ++ integer_to_list(Id)).
+    ?MODULE.
 
 insert_one(Table, Doc) ->
     BTable = list_to_binary(Table),
     gen_server:call(get_db(), {insert, BTable, [Doc]}).
-
 
 update(Table, Filter, Doc) ->
     BTable = list_to_binary(Table),
@@ -65,7 +59,6 @@ update(Table, Filter, Doc) ->
 update_raw(Table, Filter, Raw) ->
     BTable = list_to_binary(Table),
     gen_server:call(get_db(), {update, BTable, Filter, Raw}).
-
 
 % -spec get_record_info('fields' | 'size', 'account_info' | 'chat_info' | 'chat_log' | 'friend_info' | 'friend_simple' | 'user_info') -> [atom(), ...] | 3 | 6 | 9.
 get_record_info(fields, Name) ->
